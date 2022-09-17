@@ -1,0 +1,426 @@
+# An implementation of the HeroLab scripting language
+
+from typing import Dict
+import ply.lex as lex
+import pickle
+
+transitions: Dict
+references: Dict
+# Load scraped target data
+with open('c:/temp//target.data', 'rb') as datafile:
+    transitions, references = pickle.load(datafile)
+
+transition_set = set()
+reference_set = set()
+
+subDict : Dict
+for subDict in transitions.values():
+    for key in subDict.keys():
+        transition_set.add(key)
+
+for subDict in references.values():
+    for key in subDict.keys():
+        reference_set.add(key)
+
+
+keywords = (
+    'if','goto','then','else','elsif','endif','while','loop','for','to','next','done','doneif','perform','debug','foreach','nexteach','eachthing','pick','thing','bootstrap','actor','portfolio','in','where','sortas','notify','append','trustme','var','as','number','string','this','count','high','low','val','fieldval', 'TRUE', 'FALSE'
+)
+
+tokens = keywords + (
+    'PLUS', 'MINUS', 'TIMES', 'DIVIDE', 'CONCAT', 'EQUAL', 'MOD', 
+    'PLUSEQUAL', 'MINUSEQUAL', 'TIMESEQUAL', 'DIVIDEEQUAL', 'CONCATEQUAL', 'MODEQUAL', 
+    'LPAREN', 'RPAREN', 'LSQUARE', 'RSQUARE', 'DOT', 
+    'LT', 'LE', 'GT', 'GE', 'NE', 'NOT', 'COLON',
+    'COMMA', 'PERCENT', 'FLOAT', 'QUESTION', 'SCONST',
+    'ID', 'NEWLINE',  'AT', 'OR', 'XOR', 'TRANSITION', 'REFERENCE'
+)
+
+t_ignore = ' \t'
+
+
+def t_Comment(t):
+    r'~ .*'
+    return t
+
+t_COLON = r':'
+t_EQUAL = r'='
+t_PLUS = r'\+'
+t_PLUSEQUAL = r'\+='
+t_MINUS = r'-'
+t_MINUSEQUAL = r'-='
+t_TIMES = r'\*'
+t_TIMESEQUAL = r'\*='
+t_DIVIDE = r'/'
+t_DIVIDEEQUAL = r'/='
+t_MOD = r'%'
+t_MODEQUAL = r'%='
+t_CONCAT = r'&'
+t_CONCATEQUAL = r'&='
+t_LPAREN = r'\('
+t_RPAREN = r'\)'
+t_LSQUARE = r'\['
+t_RSQUARE = r'\]'
+t_DOT = r'\.'
+t_LT = r'<'
+t_LE = r'<='
+t_GT = r'>'
+t_GE = r'>='
+t_NE = r'!='
+t_COMMA = r'\,'
+t_PERCENT = r'%'
+t_QUESTION = r'\?'
+t_OR = r'\|'
+t_XOR = r'\^'
+t_NOT = r'\!'
+t_AT = r'@'
+t_FLOAT = r'((\d*\.\d+)(E[\+-]?\d+)?|([1-9]\d*E[\+-]?\d+))'
+
+# String literal
+t_SCONST = r'\"([^\\\n]|(\\.))*?\"'
+
+def t_MACRO(t):
+    r'\#[A-Za-z0-9_]+'
+    return t
+
+def t_ID(t):
+    r'[A-Za-z0-9_]+'
+    if t.value in keywords:
+        t.type = t.value
+    elif t.value in transition_set:
+        t.type = 'TRANSITION'
+    elif t.value in reference_set:
+        t.type = 'REFERENCE'
+    return t
+
+def t_NEWLINE(t):
+    r'\n'
+    t.lexer.lineno += 1
+    return t
+
+
+def t_error(t):
+    print("Illegal character %s" % t.value[0])
+    t.lexer.skip(1)
+
+
+import ply.yacc as yacc
+
+class AST_entry(object):
+    def __init__(self, lineno, linepos, tuple) -> None:
+        self.lineno = lineno
+        self.linepos = linepos
+        self.tuple = tuple
+
+precedence = (
+    ('left', 'PLUS', 'MINUS'),
+    ('left', 'TIMES', 'DIVIDE', 'MOD'),
+    ('right', 'UMINUS'),
+    ('left', 'DOT', 'LSQUARE')
+)
+
+def p_script(p):
+    '''
+    script  : statement_set
+            | empty_val
+    '''
+    p[0] = p[1]
+
+def p_empty(p):
+    'empty_val :'
+    pass
+
+def p_statement_set(p):
+    '''
+    statement_set : statement_set statement NEWLINE
+                  | statement_set NEWLINE
+                  | statement
+                  | NEWLINE
+    '''
+    statement_set = []
+    if (len(p) == 4):
+        statement_set = p[1]
+        statement_set.append(p[2])
+    elif (len(p) == 2):
+        statement_set.append(p[1])
+    elif (len(p) == 3):
+        statement_set = p[1]
+    else:
+        p[0] = None
+        return
+
+    p[0] = statement_set 
+
+def p_statement(p):
+    '''
+    statement   : label
+                | declaration
+                | assignment
+                | goto_statement
+                | if_statement
+                | while_statement
+                | for_statement
+                | doneif_statement
+                | perform_statement
+                | append_statement
+    '''
+    p[0] = p[1]
+    
+def p_label(p):
+    '''
+    label : ID COLON NEWLINE
+    '''
+    p[0] = ('LABEL', p[1])
+
+def p_declaration(p):
+    '''
+    declaration : var ID as number
+                | var ID as string
+    '''
+    p[0] = ('DECLARE', p[2], p[4])
+
+def p_assignment(p):
+    '''
+    assignment  : ID EQUAL expression
+                | field_ref EQUAL expression
+                | ID EQUAL str_expr
+                | field_ref EQUAL str_expr
+    '''
+    p[0] = ('ASSIGN', p[1], p[3])
+
+def p_expression(p):
+    '''
+    expression : expr
+    '''
+    #                 | intrinsic_call
+    p[0] = p[1]
+
+def p_expr_binary(p):
+    '''expr : expr PLUS expr
+            | expr MINUS expr
+            | expr TIMES expr
+            | expr DIVIDE expr
+            | expr MOD expr'''
+
+    p[0] = ('BINOP', p[2], p[1], p[3])
+
+def p_str_expr(p):
+    '''str_expr : str_expr CONCAT str_expr'''
+    p[0] = ('BINOP', p[2], p[1], p[3])
+
+def p_str_expr_variable(p):
+    '''str_expr : ID'''
+    p[0] = ('VAR', p[1])
+
+def p_str_expr_literal(p):
+    '''expr : SCONST'''
+    p[0] = ('STRING', eval(p[1]))
+
+def p_expr_number(p):
+    '''expr : FLOAT'''
+    p[0] = ('NUM', eval(p[1]))
+
+def p_field_reference(p):
+    '''field_ref  : this DOT transition
+                  | transition'''
+    if len(p) > 2:
+        transition = p[3]
+    else:
+        transition = p[1]
+    p[0] = ('FIELD_REF', transition)
+
+def p_transition(p):
+    '''transition : TRANSITION dotexpr
+                  | TRANSITION LSQUARE paramlist RSQUARE dotexpr
+    '''
+    params = []
+    if len(p) > 3:
+        params = p[3]
+    p[0] = ('TRANSITION', params, p[1])
+
+def p_reference(p):
+    '''transition : REFERENCE
+                  | REFERENCE LSQUARE paramlist RSQUARE
+    '''
+    params = []
+    if len(p) > 3:
+        params = p[3]
+    p[0] = ('REFERENCE', params, p[1])
+
+def p_expr_dot(p):
+    '''dotexpr : DOT transition'''
+    p[0] = ('DOT_REFERENCE', p[2])
+
+def p_field_param_list(p):
+    '''paramlist : paramlist COMMA expr
+                  | paramlist COMMA str_expr
+                  | expr
+                  | str_expr'''
+    paramlist = []
+    if (len(p) > 2):
+        paramlist = p[1]
+        paramlist.append(p[3])
+    else:
+        paramlist.append(p[1])
+    
+
+    p[0] = paramlist
+
+
+def p_expr_variable(p):
+    '''expr     : ID'''
+    p[0] = ('VAR', p[1])
+
+def p_expr_group(p):
+    '''expr : LPAREN expr RPAREN'''
+    p[0] = ('GROUP', p[2])
+
+def p_expr_unary(p):
+    '''expr : MINUS expr %prec UMINUS'''
+    p[0] = ('UNARY', '-', p[2])
+
+def p_binop_assign(p):
+    '''assignment : ID PLUSEQUAL expr
+            | ID MINUSEQUAL expr
+            | ID TIMESEQUAL expr
+            | ID DIVIDEEQUAL expr
+            | ID MODEQUAL expr'''
+    p[0] = ('ASSIGNBINOP', p[2], p[1], p[3])
+
+def p_binop_assign_2(p):
+    '''assignment : ID CONCATEQUAL str_expr'''
+    p[0] = ('ASSIGNBINOP', p[2], p[1], p[3])    
+
+def p_goto_statement(p):
+    '''goto_statement : goto ID'''
+    p[0] = ('GOTO', p[2])
+
+def p_expr_comp(p):
+    '''expr_comp    : expr LT expr
+                    | expr LE expr
+                    | expr GT expr
+                    | expr GE expr
+                    | expr NE expr
+                    | expr EQUAL expr'''
+
+    p[0] = ('COMPOP', p[2], p[1], p[3])
+
+# selection-statement
+
+def p_selection_statement_1(p):
+    '''
+    if_statement    : if LPAREN expr_comp RPAREN then NEWLINE statement_set endif
+                    | if LPAREN expr_comp RPAREN then NEWLINE statement_set else statement_set endif
+                    | if LPAREN expr_comp RPAREN then NEWLINE statement_set elsif_set endif
+                    | if LPAREN expr_comp RPAREN then NEWLINE statement_set elsif_set else statement_set endif
+    '''
+    # The first level is always there
+    expressions = []
+    expressions.append((p[3], p[7])) 
+    else_statement = None
+    if (p[8] == "else"):
+        else_statement = p[9]
+
+    if (p.slice[8].type == 'elsif_set'): #elsifs
+        expressions.extend(p[8])
+        if (p[9] == 'else'):
+            else_statement = p[10]
+
+    p[0] = ('IF', expressions, else_statement)
+    pass
+
+def p_elsif_set(p):
+    '''
+    elsif_set   : elsif_set elsif_statement
+                | elsif_statement
+    '''
+    elsif_set = []
+    if (len(p)>2):
+        elsif_set = p[1]
+        elsif_set.append(p[2])
+    else:
+        elsif_set.append(p[1])
+    
+    p[0] = elsif_set 
+
+def p_elsif_statement(p):
+    'elsif_statement : elsif LPAREN expr_comp RPAREN then NEWLINE statement_set'
+    p[0] = (p[3], p[7])
+
+def p_while_statement(p):
+    '''
+    while_statement : while LPAREN expr_comp RPAREN NEWLINE statement_set loop
+    '''
+    p[0] = ('WHILE', p[3], p[6])
+
+def p_for_statement(p):
+    '''
+    for_statement : for ID EQUAL expr to expr NEWLINE statement_set next
+    '''
+    p[0] = ('FOR', p[2], p[4], p[6], p[8])
+
+def p_doneif(p):
+    '''
+    doneif_statement : doneif LPAREN expr_comp RPAREN
+    '''
+    p[0] = ('DONEIF', p[3])
+
+def p_perform_statement(p):
+    '''perform_statement : perform field_ref'''
+    p[0] = ('PERFORM', p[2])
+
+def p_append_statement(p):
+    '''append_statement : append str_expr'''
+    p[0] = ('APPEND', p[2])
+
+def p_trustme_statement(p):
+    '''trustme_statement : trustme'''
+    p[0] = ('TRUSTME')
+
+def p_notify_statement(p):
+    '''notify_statement : notify str_expr'''
+    p[0] = ('NOTIFY', p[2])
+
+def p_debug_statement(p):
+    '''debug_statement : debug str_expr'''
+    p[0] = ('DEBUG', p[2])
+
+def p_foreach_statement(p):
+    '''foreach_statement    : foreach pick in ID statement_set nexteach
+                            | foreach thing in ID statement_set nexteach
+                            | foreach bootstrap in ID statement_set nexteach
+                            | foreach actor in portfolio statement_set nexteach'''    
+    p[0] = ('FOREACH', p[2], p[4], p[5])
+
+lexer = lex.lex(debug=True)
+
+parser = yacc.yacc(debug=True)
+
+if __name__ == "__main__":
+
+    result = parser.parse(input='''this.portal["stats"].width = 50
+    ''', debug=True)
+    print(result)
+    
+    result = parser.parse(input='''if (X<5) then
+      goto 20
+    endif
+    ''', debug=True)
+
+    result = parser.parse('''id:
+    goto id
+    ''')
+    
+    result = parser.parse('''if (X<5) then
+      goto 20
+    elsif (Y < 10) then
+      goto 30
+    elsif (G = 4+9) then
+      goto 40
+    else
+      goto 50
+    endif
+    ''')
+    print(result)
+    
+    
