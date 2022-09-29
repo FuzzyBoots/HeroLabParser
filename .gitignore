@@ -87,3 +87,8 @@ ENV/
 
 # Rope project settings
 .ropeproject
+HeroLab.dot
+
+# SLY debug files
+.out
+.dot

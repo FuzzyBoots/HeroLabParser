@@ -39,8 +39,9 @@ if __name__ == '__main__':
     tokens = lexer.tokenize(data)
     tokens_bak = lexer.tokenize(data)
     for tok in tokens_bak:
-        print('type=%r, value=%r, lineno=%r, index=%r' % (tok.type, tok.value, tok.lineno, tok.index))
+        print('type=%r, value=%r, lineno=%r, index=%r, end=%r' % (tok.type, tok.value, tok.lineno, tok.index, tok.end))
 
     parser = HeroLabParser()
     result = parser.parse(tokens)
-    print (result)
+    # print (result)
+    print (result[0])
